@@ -1,0 +1,17 @@
+{
+   "cookie": "从浏览器复制过来的整段 Cookie 字符串",
+   // 每次请求条数限制，50条十分够用了
+   "limit": 50,
+   "state_file": "fanbox_monitor_state.json",
+   "bark_key": "你的 Bark 推送 key，可选",
+   "bark_group": "可选的 Bark 分组名称，默认：Fanbox赞助者跟踪",
+   // 检查关注用户的更新
+   "check_following": false,
+   // 推送通知的最小订阅金额，默认为 0，表示全部推送
+   "min_fee_required": 0,
+   "creators_file": "fanbox_monitor_creators.json",
+   // 是否使用代理
+   "proxy": "http://172.17.0.1:7890",
+   // you can delete language, then it will auto detect your system language
+   "language": "zh"
+}
