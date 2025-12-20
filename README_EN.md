@@ -11,6 +11,9 @@
   - Compares the latest post `id` for each creator, outputs "new post" notifications and sends Bark notifications when changes are detected
 - **Authentication**: Uses browser login cookies (consistent with the browser extension in this repository, relies on cookie authentication).
 
+
+**Work is hard! If you love this project, please consider star me~**
+
 ---
 
 ## Installation

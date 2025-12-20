@@ -4,6 +4,8 @@
 
 A Python script to monitor updates from creators you support or follow on Pixiv Fanbox, with automatic Bark notifications.
 
+**Work is hard! If you love this project, please consider star me~**
+
 ## Quick Start
 
 1. Install dependencies:
