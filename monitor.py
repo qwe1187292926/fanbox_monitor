@@ -96,7 +96,7 @@ def notify_bark(
             "title": title,
             "content": msg,
             "url": url,
-            "group": bark_group,
+            "group": bark_group + ' - ' + post.creator_name,
         }
         # 如果有头像 URL，添加到通知参数中
         if post.creator_icon_url:
@@ -162,14 +162,14 @@ def save_creators(
 
 
 def check_supporting_posts(
-    api: FanboxAPI,
-    state: Dict[str, str],
-    bark_key: Optional[str],
-    bark_group: str,
-    limit: int,
-    default_min_fee: int,
-    config_path: str,
-    language: str = "en",
+        api: FanboxAPI,
+        state: Dict[str, str],
+        bark_key: Optional[str],
+        bark_group: str,
+        limit: int,
+        default_min_fee: int,
+        config_path: str,
+        language: str = "en",
 ) -> Tuple[Dict[str, str], list[Dict[str, str]]]:
     """
     检查正在赞助的创作者是否有新投稿。
@@ -177,37 +177,52 @@ def check_supporting_posts(
     """
     raw = api.list_supporting_posts(limit=limit)
     posts = api.parse_posts_from_supporting(raw)
-    latest = group_latest_by_creator(posts)
+
+    # 按创作者分组
+    posts_by_creator = {}
+    for post in posts:
+        if post.creator_id not in posts_by_creator:
+            posts_by_creator[post.creator_id] = []
+        posts_by_creator[post.creator_id].append(post)
 
     # 收集创作者信息（用于保存到配置文件）
     creators_list = []
-    for creator_id, post in latest.items():
-        creators_list.append({
-            "creatorId": creator_id,
-            "name": post.creator_name,
-            "iconUrl": post.creator_icon_url,
-        })
+    for creator_id, creator_posts in posts_by_creator.items():
+        if creator_posts:
+            post = creator_posts[0]  # 最新的帖子
+            creators_list.append({
+                "creatorId": creator_id,
+                "name": post.creator_name,
+                "iconUrl": post.creator_icon_url,
+            })
 
     new_state = dict(state)
-    for creator_id, post in latest.items():
+    for creator_id, creator_posts in posts_by_creator.items():
         # 确保配置文件中存在该创作者的最小监听金额配置
         creator_min_fee = ensure_creator_min_fee(config_path, creator_id, default_min_fee)
-        
-        state_key = f"supporting:{creator_id}"
+
+        state_key = creator_id
         last_id = state.get(state_key)
+
         if last_id is None:
-            # 第一次看到这个创作者，记录当前 id，不提示
-            new_state[state_key] = post.id
+            # 第一次看到这个创作者，记录最新 id，不提示
+            if creator_posts:
+                new_state[state_key] = creator_posts[0].id
             continue
 
-        if str(post.id) != str(last_id):
-            # 检查收费金额是否符合要求（使用该创作者特定的最小金额）
-            if post.fee_required < creator_min_fee:
-                # 收费金额不足，跳过通知但更新状态
-                new_state[state_key] = post.id
-                continue
+        # 查找所有符合条件的新帖子（最多10个）
+        new_posts = []
+        for post in creator_posts:
+            if str(post.id) == str(last_id):
+                # 找到上次的帖子，停止继续查找
+                break
+            if post.fee_required >= creator_min_fee:
+                new_posts.append(post)
+            if len(new_posts) >= 10:  # 最多10个
+                break
 
-            # 有新投稿且符合收费要求
+        # 通知所有符合条件的新帖子
+        for post in reversed(new_posts):  # 从最老的新帖开始通知
             formatted_date = format_datetime(post.published_datetime)
             fee_info = f" (收费: {post.fee_required}日元)" if post.fee_required > 0 else " (免费)"
             print(
@@ -215,20 +230,24 @@ def check_supporting_posts(
                 f"{post.title} (id={post.id}, 发布于 {formatted_date}{fee_info})"
             )
             notify_bark(bark_key, bark_group, post, "supporting", language)
-            new_state[state_key] = post.id
+
+        # 更新状态为最新的帖子ID
+        if creator_posts:
+            new_state[state_key] = creator_posts[0].id
 
     return new_state, creators_list
 
 
+
 def check_following_posts(
-    api: FanboxAPI,
-    state: Dict[str, str],
-    bark_key: Optional[str],
-    bark_group: str,
-    limit: int,
-    default_min_fee: int,
-    config_path: str,
-    language: str = "en",
+        api: FanboxAPI,
+        state: Dict[str, str],
+        bark_key: Optional[str],
+        bark_group: str,
+        limit: int,
+        default_min_fee: int,
+        config_path: str,
+        language: str = "en",
 ) -> Tuple[Dict[str, str], list[Dict[str, str]]]:
     """
     检查关注的创作者是否有新投稿。
@@ -252,38 +271,45 @@ def check_following_posts(
         try:
             raw = api.list_creator_posts(creator_id, limit=limit)
             posts = api.parse_posts_from_creator(raw, creator_id, creator_name, creator_icon_url)
+
             if not posts:
                 continue
 
-            # 取最新的一条
-            latest_post = posts[0]
-            state_key = f"following:{creator_id}"
+            state_key = creator_id
             last_id = state.get(state_key)
 
             # 确保配置文件中存在该创作者的最小监听金额配置
             creator_min_fee = ensure_creator_min_fee(config_path, creator_id, default_min_fee)
-            
+
             if last_id is None:
-                # 第一次看到这个创作者，记录当前 id，不提示
-                new_state[state_key] = latest_post.id
+                # 第一次看到这个创作者，记录最新 id，不提示
+                new_state[state_key] = posts[0].id
                 continue
 
-            if str(latest_post.id) != str(last_id):
-                # 检查收费金额是否符合要求（使用该创作者特定的最小金额）
-                if latest_post.fee_required < creator_min_fee:
-                    # 收费金额不足，跳过通知但更新状态
-                    new_state[state_key] = latest_post.id
-                    continue
+            # 查找所有符合条件的新帖子（最多10个）
+            new_posts = []
+            for post in posts:
+                if str(post.id) == str(last_id):
+                    # 找到上次的帖子，停止继续查找
+                    break
+                if post.fee_required >= creator_min_fee:
+                    new_posts.append(post)
+                if len(new_posts) >= 10:  # 最多10个
+                    break
 
-                # 有新投稿且符合收费要求
-                formatted_date = format_datetime(latest_post.published_datetime)
-                fee_info = f" (收费: {latest_post.fee_required}日元)" if latest_post.fee_required > 0 else " (免费)"
+            # 通知所有符合条件的新帖子
+            for post in reversed(new_posts):  # 从最老的新帖开始通知
+                formatted_date = format_datetime(post.published_datetime)
+                fee_info = f" (收费: {post.fee_required}日元)" if post.fee_required > 0 else " (免费)"
                 print(
-                    f"[NEW] 关注 - {latest_post.creator_name} ({creator_id}) 有新投稿："
-                    f"{latest_post.title} (id={latest_post.id}, 发布于 {formatted_date}{fee_info})"
+                    f"[NEW] 关注 - {post.creator_name} ({creator_id}) 有新投稿："
+                    f"{post.title} (id={post.id}, 发布于 {formatted_date}{fee_info})"
                 )
-                notify_bark(bark_key, bark_group, latest_post, "following", language)
-                new_state[state_key] = latest_post.id
+                notify_bark(bark_key, bark_group, post, "following", language)
+
+            # 更新状态为最新的帖子ID
+            new_state[state_key] = posts[0].id
+
         except Exception as e:
             print(f"检查关注者 {creator_name} ({creator_id}) 的投稿失败: {e}", file=sys.stderr)
             continue
@@ -298,6 +324,7 @@ def check_following_posts(
         for c in creators
     ]
     return new_state, creators_list
+
 
 
 def run_once(
